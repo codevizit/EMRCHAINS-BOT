@@ -84,7 +84,6 @@ with st.sidebar:
     st.title("⚙️ Configuration")
     st.divider()
 
-    st.info(f"API: {BASE_URL}")
 
     session_id_input = st.text_input(
         "Session ID",
