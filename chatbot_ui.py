@@ -1,19 +1,16 @@
 import streamlit as st
 import requests
 import uuid
+import re
 
-# ─────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────
+# ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Hospital Chatbot Tester",
     page_icon="🏥",
     layout="centered",
 )
 
-# ─────────────────────────────────────────────────────────────
-# CUSTOM CSS
-# ─────────────────────────────────────────────────────────────
+# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 #MainMenu, footer, header {visibility: hidden;}
@@ -34,14 +31,23 @@ st.markdown("""
     color: #1e293b;
     padding: 10px 15px;
     border-radius: 18px 18px 18px 4px;
-    margin: 5px 0;
+    margin: 6px 0;
     max-width: 75%;
     margin-right: auto;
     word-wrap: break-word;
 }
 
-.bubble-wrapper-user { display: flex; justify-content: flex-end; }
-.bubble-wrapper-assistant { display: flex; justify-content: flex-start; }
+.bubble-wrapper-user {
+    display: flex;
+    justify-content: flex-end;
+    margin: 4px 0;
+}
+
+.bubble-wrapper-assistant {
+    display: flex;
+    justify-content: flex-start;
+    margin: 4px 0;
+}
 
 .chat-label {
     font-size: 11px;
@@ -49,120 +55,157 @@ st.markdown("""
     margin-bottom: 2px;
 }
 
-.chat-label-user { text-align: right; }
+.chat-label-user {
+    text-align: right;
+}
+
+.health-dot-ok {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #22c55e;
+    margin-right: 6px;
+}
+
+.health-dot-error {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ef4444;
+    margin-right: 6px;
+}
+
+.health-dot-unknown {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #94a3b8;
+    margin-right: 6px;
+}
 </style>
 """, unsafe_allow_html=True)
 
+# ── Session state ─────────────────────────────────────────────────────────────
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# ─────────────────────────────────────────────────────────────
-# SESSION STATE
-# ─────────────────────────────────────────────────────────────
-def init_state():
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = str(uuid.uuid4())
+if "health_status" not in st.session_state:
+    st.session_state.health_status = None
 
-    if "health" not in st.session_state:
-        st.session_state.health = None
+if "health_data" not in st.session_state:
+    st.session_state.health_data = {}
 
-
-init_state()
-
-
-# ─────────────────────────────────────────────────────────────
-# API CONFIG (FROM SECRETS ONLY)
-# ─────────────────────────────────────────────────────────────
-BASE_URL = st.secrets.get("API_BASE_URL", "http://externalapi:8000")
-
-
-# ─────────────────────────────────────────────────────────────
-# SIDEBAR
-# ─────────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("⚙️ Configuration")
+    st.title("⚙️ Config")
     st.divider()
 
+    base_url = st.text_input(
+        "API Base URL",
+        value="http://localhost:8000",
+        help="Backend API URL"
+    )
 
-    session_id_input = st.text_input(
+    hospital_id = st.text_input(
+        "Hospital ID",
+        value="",
+        placeholder="e.g. city-hospital"
+    )
+
+    session_id = st.text_input(
         "Session ID",
         value=st.session_state.session_id
     )
-    st.session_state.session_id = session_id_input.strip() or st.session_state.session_id
+    st.session_state.session_id = session_id
 
     st.divider()
 
     # Health check
-    if st.button("Check API Health"):
+    if st.button("Check Health", use_container_width=True):
         try:
-            res = requests.get(BASE_URL.rstrip("/") + "/health", timeout=5)
-            st.session_state.health = res.json()
-        except Exception as e:
-            st.session_state.health = {"status": "error", "detail": str(e)}
+            resp = requests.get(f"{base_url}/health", timeout=5)
+            data = resp.json()
+            st.session_state.health_status = data.get("status", "error")
+            st.session_state.health_data = data
+        except Exception:
+            st.session_state.health_status = "error"
+            st.session_state.health_data = {}
 
-    if st.session_state.health:
-        status = st.session_state.health.get("status", "unknown")
+    status = st.session_state.health_status
 
-        if status == "ok":
-            st.success("API Healthy")
-        elif status == "degraded":
-            st.warning("API Degraded")
-        else:
-            st.error("API Down")
+    if status == "ok":
+        st.markdown('<span class="health-dot-ok"></span> API Online', unsafe_allow_html=True)
+    elif status in ("degraded", "error"):
+        st.markdown('<span class="health-dot-error"></span> API Offline / Degraded', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="health-dot-unknown"></span> Not checked yet', unsafe_allow_html=True)
+
+    # Component breakdown
+    components = st.session_state.health_data.get("components", {})
+    for k, v in components.items():
+        icon = "✅" if v == "ok" else "❌"
+        st.caption(f"{icon} {k}: {v}")
 
     st.divider()
 
-    if st.button("Clear Chat"):
+    if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.session_state.session_id = str(uuid.uuid4())
         st.rerun()
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def strip_session_state(text: str) -> str:
+    return re.sub(
+        r'\n\n\[SESSION_STATE\].*?\[/SESSION_STATE\]',
+        '',
+        text,
+        flags=re.DOTALL
+    ).strip()
 
-# ─────────────────────────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────────────────────────
-st.title("🏥 Hospital Chatbot Tester")
-st.caption("Production-grade Streamlit client")
-
-
-# ─────────────────────────────────────────────────────────────
-# VALIDATION
-# ─────────────────────────────────────────────────────────────
-def validate(session_id: str) -> bool:
-    if not session_id.strip():
-        st.error("Session ID cannot be empty")
+def validate_config():
+    if not hospital_id.strip():
+        st.error("Please enter Hospital ID")
         return False
-    if not BASE_URL.startswith("http"):
-        st.error("Invalid API URL in secrets")
+    if not base_url.startswith("http"):
+        st.error("Invalid API URL")
         return False
     return True
 
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("## 🏥 Hospital Chatbot Tester")
+st.caption("Local testing interface for FastAPI chatbot")
+st.divider()
 
-# ─────────────────────────────────────────────────────────────
-# CHAT HISTORY
-# ─────────────────────────────────────────────────────────────
+# ── Chat history ──────────────────────────────────────────────────────────────
 for msg in st.session_state.messages:
     if msg["role"] == "user":
         st.markdown('<div class="chat-label chat-label-user">You</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="bubble-wrapper-user"><div class="bubble-user">{msg["content"]}</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="bubble-wrapper-user"><div class="bubble-user">{msg["content"]}</div></div>',
+            unsafe_allow_html=True
+        )
     else:
         st.markdown('<div class="chat-label">Assistant</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{msg["content"]}</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{msg["content"]}</div></div>',
+            unsafe_allow_html=True
+        )
 
-
-# ─────────────────────────────────────────────────────────────
-# CHAT INPUT
-# ─────────────────────────────────────────────────────────────
+# ── Chat input ────────────────────────────────────────────────────────────────
 user_input = st.chat_input("Type your message...")
 
 if user_input:
 
-    if not validate(st.session_state.session_id):
+    if not validate_config():
         st.stop()
 
-    hospital_id = "hospital_knowledge"
-
+    # Add user message
     st.session_state.messages.append({
         "role": "user",
         "content": user_input
@@ -171,35 +214,38 @@ if user_input:
     history = st.session_state.messages[:-1]
 
     payload = {
-        "hospital_id": hospital_id,
+        "hospital_id": hospital_id.strip(),
         "session_id": st.session_state.session_id,
         "message": user_input,
         "history": history,
     }
 
-    url = BASE_URL.rstrip("/") + "/chat"
-
     with st.spinner("Thinking..."):
         try:
-            res = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(
+                f"{base_url}/chat",
+                json=payload,
+                timeout=30
+            )
 
-            if res.status_code == 200:
-                reply = res.json().get("reply", "No response")
-            elif res.status_code == 422:
-                reply = f"Validation error: {res.text}"
+            if resp.status_code == 200:
+                reply = resp.json().get("reply", "(no reply)")
+            elif resp.status_code == 422:
+                reply = f"Validation error: {resp.json().get('detail', resp.text)}"
             else:
-                reply = f"Error {res.status_code}: {res.text}"
+                reply = f"Error {resp.status_code}: {resp.text}"
 
-        except requests.exceptions.Timeout:
-            reply = "Request timed out"
         except requests.exceptions.ConnectionError:
             reply = "Cannot connect to API"
+        except requests.exceptions.Timeout:
+            reply = "Request timed out"
         except Exception as e:
-            reply = f"Error: {str(e)}"
+            reply = f"Unexpected error: {str(e)}"
 
+    # Store assistant reply
     st.session_state.messages.append({
         "role": "assistant",
-        "content": reply
+        "content": strip_session_state(reply)
     })
 
     st.rerun()
