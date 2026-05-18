@@ -107,10 +107,10 @@ with st.sidebar:
     st.divider()
 
     base_url = st.text_input(
-        "API Base URL",
-        value="http://localhost:8000",
-        help="Backend API URL"
-    )
+    "API Base URL",
+    value="http://<GCP_EXTERNAL_IP>:8001",
+    help="Use your deployed FastAPI public URL"
+)
 
     hospital_id = st.text_input(
         "Hospital ID",
