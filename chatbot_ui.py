@@ -108,17 +108,14 @@ with st.sidebar:
 
     import os
 
-    DEFAULT_API_URL = (
+    base_url = (
     st.secrets.get("API_BASE_URL")
     or os.getenv("API_BASE_URL")
-    or "http://localhost:8000"
 )
 
-base_url = st.text_input(
-    "API Base URL",
-    value=DEFAULT_API_URL,
-    help="Loaded from Streamlit secrets or environment"
-)
+    if not base_url:
+    st.error("API_BASE_URL is not set in secrets or environment variables")
+    st.stop()
 
     hospital_id = st.text_input(
         "Hospital ID",
