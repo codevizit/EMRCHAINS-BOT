@@ -114,8 +114,8 @@ with st.sidebar:
 )
 
     if not base_url:
-    st.error("API_BASE_URL is not set in secrets or environment variables")
-    st.stop()
+        st.error("API_BASE_URL is not set in secrets or environment variables")
+        st.stop()
 
     hospital_id = st.text_input(
         "Hospital ID",
