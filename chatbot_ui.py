@@ -106,10 +106,18 @@ with st.sidebar:
     st.title("⚙️ Config")
     st.divider()
 
-    base_url = st.text_input(
+    import os
+
+    DEFAULT_API_URL = (
+    st.secrets.get("API_BASE_URL")
+    or os.getenv("API_BASE_URL")
+    or "http://localhost:8000"
+)
+
+base_url = st.text_input(
     "API Base URL",
-    value="http://<GCP_EXTERNAL_IP>:8001",
-    help="Use your deployed FastAPI public URL"
+    value=DEFAULT_API_URL,
+    help="Loaded from Streamlit secrets or environment"
 )
 
     hospital_id = st.text_input(
