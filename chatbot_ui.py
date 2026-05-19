@@ -198,9 +198,11 @@ for msg in st.session_state.messages:
     else:
         st.markdown('<div class="chat-label">Assistant</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{msg["content"]}</div></div>',
+            f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{strip_session_state(msg["content"])}</div></div>',
             unsafe_allow_html=True
         )
+
+
 
 # ── Chat input ────────────────────────────────────────────────────────────────
 user_input = st.chat_input("Type your message...")
@@ -248,9 +250,11 @@ if user_input:
             reply = f"Unexpected error: {str(e)}"
 
     # Store assistant reply
+    # Store FULL reply including SESSION_STATE — needed for next turn context
     st.session_state.messages.append({
         "role": "assistant",
-        "content": strip_session_state(reply)
+        "content": reply
     })
 
     st.rerun()
+   
