@@ -54,6 +54,15 @@ st.markdown("""
     .chat-label-user {
         text-align: right;
     }
+    .session-badge {
+        font-size: 11px;
+        color: #64748b;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 4px 8px;
+        word-break: break-all;
+    }
     .health-dot-ok {
         display: inline-block;
         width: 10px; height: 10px;
@@ -124,6 +133,9 @@ chat_stream_endpoint = chat_endpoint_override or f"{base_url}/chat/stream"
 
 
 # ── Session state defaults ────────────────────────────────────────────────────
+# NOTE: st.session_state.messages is now DISPLAY-ONLY.
+# Conversation history lives server-side in the chat_messages table,
+# keyed by session_id. The API no longer reads client-sent history.
 if "messages" not in st.session_state:
     st.session_state.messages = []          # list of {"role": ..., "content": ...}
 if "session_id" not in st.session_state:
@@ -151,10 +163,20 @@ with st.sidebar:
     session_id = st.text_input(
         "Session ID",
         value=st.session_state.session_id,
-        help="Auto-generated UUID. Edit if you want a custom session."
+        help=(
+            "Auto-generated UUID. Paste an old session ID to RESUME that "
+            "session (server restores identity, flow state, and history)."
+        )
     )
     # Sync edits back to session state
     st.session_state.session_id = session_id
+
+    # Prominent current-session badge — cross-reference this against the
+    # chat_sessions table in your DB tool while testing.
+    st.markdown(
+        f'<div class="session-badge"> Active session:<br>{st.session_state.session_id}</div>',
+        unsafe_allow_html=True
+    )
 
     st.divider()
 
@@ -190,32 +212,46 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("🗑️ Clear Chat", use_container_width=True):
+    # New Session = new UUID → server creates a fresh chat_sessions row
+    # (fresh identity, no OTP, empty flow state). This is a REAL reset now,
+    # not just a UI clear.
+    if st.button("🆕 New Session", use_container_width=True):
         st.session_state.messages = []
         st.session_state.session_id = str(uuid.uuid4())
+        st.rerun()
+
+    # Clear Display only wipes local bubbles — the server-side session and
+    # history remain intact. Useful for testing that the bot still remembers
+    # context it loaded from chat_messages.
+    if st.button("🗑️ Clear Display Only", use_container_width=True):
+        st.session_state.messages = []
         st.rerun()
 
 
 # ── Main area ─────────────────────────────────────────────────────────────────
 st.markdown("## EMRChains Chatbot Tester")
-st.caption("A local dev interface for your FastAPI chatbot. API URL is loaded from secrets — just fill in Hospital ID and start chatting.")
+st.caption(
+    "API URL is loaded from secrets — just fill in Hospital ID and start chatting. "
+    "History and state are stored SERVER-SIDE per session ID — this UI only displays the conversation."
+)
 st.divider()
 
 
-import re
-
-def strip_session_state(text: str) -> str:
-    return re.sub(r'\n\n\[SESSION_STATE\].*?\[/SESSION_STATE\]', '', text, flags=re.DOTALL).strip()
-
-# Render chat history
+# Render chat history (display only — no SESSION_STATE stripping needed
+# anymore, the backend no longer emits state blocks in responses)
 for msg in st.session_state.messages:
     if msg["role"] == "user":
-        st.markdown(f'<div class="chat-label chat-label-user">You</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="bubble-wrapper-user"><div class="bubble-user">{msg["content"]}</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="chat-label chat-label-user">You</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="bubble-wrapper-user"><div class="bubble-user">{msg["content"]}</div></div>',
+            unsafe_allow_html=True
+        )
     else:
-        clean_content = strip_session_state(msg["content"])
-        st.markdown(f'<div class="chat-label">Assistant</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{clean_content}</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="chat-label">Assistant</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{msg["content"]}</div></div>',
+            unsafe_allow_html=True
+        )
 
 # Input box always at bottom
 user_input = st.chat_input("Type your message...")
@@ -226,23 +262,22 @@ if user_input:
         st.error("Please enter a Hospital ID in the sidebar before chatting.")
         st.stop()
 
-    # Add user message to history
+    # Add user message to local display
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # Build payload — send full history EXCLUDING current message (it's in `message`)
-    history_for_api = st.session_state.messages[:-1]  # all except the just-added user msg
-
+    # Payload — NO history field. The server loads the last N messages from
+    # chat_messages itself and ignores anything the client claims about the past.
     payload = {
         "hospital_id": hospital_id.strip(),
         "session_id": st.session_state.session_id,
         "message": user_input,
-        "history": history_for_api,
+        "history": [],  # kept only for schema compatibility; server ignores it.
+                        # Remove this line once `history` is dropped from ChatRequest.
     }
 
     # Call streaming API (endpoint resolved from secrets)
     reply_chunks = []
     placeholder = st.empty()
-    display_so_far = ""
 
     try:
         with requests.post(
@@ -255,9 +290,9 @@ if user_input:
                 for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
                     if chunk:
                         reply_chunks.append(chunk)
-                        display_so_far = strip_session_state("".join(reply_chunks))
                         placeholder.markdown(
-                            f'<div class="bubble-wrapper-assistant"><div class="bubble-assistant">{display_so_far}</div></div>',
+                            f'<div class="bubble-wrapper-assistant">'
+                            f'<div class="bubble-assistant">{"".join(reply_chunks)}</div></div>',
                             unsafe_allow_html=True
                         )
             elif resp.status_code == 422:
@@ -271,13 +306,10 @@ if user_input:
     except Exception as e:
         reply_chunks.append(f"❌ Unexpected error: {str(e)}")
 
-    reply = "".join(reply_chunks)  # full reply including SESSION_STATE — stored in history
+    reply = "".join(reply_chunks)
 
-    # Store FULL reply in history (SESSION_STATE included — needed for next turn)
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-    # Display CLEAN reply to patient (SESSION_STATE hidden)
-    display_reply = strip_session_state(reply)
     st.rerun()
 
 #================
